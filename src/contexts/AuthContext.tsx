@@ -20,6 +20,8 @@ interface AuthContextType {
   signOut: () => Promise<{ error: AuthError | null }>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
   resendConfirmation: (email: string) => Promise<{ error: AuthError | null }>;
+  pendingProfileFiles: { foto: File | null, fotos: File[] } | null;
+  setPendingProfileFiles: (files: { foto: File | null, fotos: File[] } | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +38,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingProfileFiles, setPendingProfileFilesState] = useState<{ foto: File | null, fotos: File[] } | null>(null);
+
+  const setPendingProfileFiles = (files: { foto: File | null, fotos: File[] } | null) => {
+    setPendingProfileFilesState(files);
+  };
 
   useEffect(() => {
     // Test Supabase connection and database on startup
@@ -143,12 +150,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const pendingData = localStorage.getItem('pendingProfessionalData');
         if (pendingData) {
           try {
-            const professionalData = JSON.parse(pendingData);
-            await createProfessionalProfile(session.user.id, professionalData);
-            localStorage.removeItem('pendingProfessionalData');
-            console.log('✅ Professional profile created successfully from pending data and removed from localStorage');
+            const professionalDataFromStorage = JSON.parse(pendingData);
+            // CRITICAL: Use pendingProfileFiles state here
+            if (pendingProfileFiles) { // Check if files are set
+              await createProfessionalProfile(session.user.id, professionalDataFromStorage, pendingProfileFiles);
+              localStorage.removeItem('pendingProfessionalData');
+              setPendingProfileFiles(null); // Clear the files from state
+              console.log('✅ Professional profile created from pending data and files. Cleared localStorage and pending files state.');
+            } else {
+              // This case should ideally not happen if Register.tsx sets files correctly
+              console.warn('⚠️ Pending professional data found in localStorage, but no pending files in AuthContext state. Profile might be incomplete.');
+              // Decide if you still want to attempt profile creation without files or log an error.
+              // For now, let's assume files are required if pendingData exists from registration.
+              // If createProfessionalProfile requires files, this path needs careful consideration.
+              // Let's assume for now that if pendingProfileFiles is null, we don't proceed with this specific logic
+              // or we call createProfessionalProfile with null/empty files if that's a valid state.
+              // Given the plan, Register.tsx will always call setPendingProfileFiles.
+              // So, if pendingData exists, pendingProfileFiles should also exist.
+            }
           } catch (error) {
-            console.error('❌ Critical error creating professional profile from pending data. Data will be kept in localStorage for next attempt:', error);
+            // Error handling for createProfessionalProfile (e.g., DB error)
+            // localStorage.removeItem and setPendingProfileFiles(null) are NOT called here, preserving data.
+            console.error('❌ Critical error creating professional profile from pending data. Data will be kept for next attempt (localStorage & context state):', error);
           }
         }
       }
@@ -174,7 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const createProfessionalProfile = async (userId: string, data: any) => {
+  const createProfessionalProfile = async (userId: string, profileData: any, filesToUpload: { foto: File | null, fotos: File[] }) => {
     try {
       console.log('Creating professional profile for user:', userId);
       
@@ -183,37 +206,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const fotosTrabajos: string[] = [];
 
       // Subir foto de perfil
-      if (data.foto && data.foto instanceof File) {
+      if (filesToUpload && filesToUpload.foto instanceof File) {
         try {
-          const { data: photoUrl, error: photoError } = await professionalService.uploadPhoto(
-            data.foto,
+          const { data: photoUrlData, error: photoError } = await professionalService.uploadPhoto(
+            filesToUpload.foto, // Use filesToUpload.foto
             'profiles',
             userId
           );
-          if (!photoError && photoUrl) {
-            fotoUrl = photoUrl;
+          if (!photoError && photoUrlData) {
+            fotoUrl = photoUrlData;
+          } else if (photoError) {
+            console.error('❌ Error uploading profile photo:', photoError);
           }
         } catch (error) {
-          console.error('❌ Error uploading profile photo:', error);
+          console.error('❌ Exception uploading profile photo:', error);
         }
       }
 
       // Subir fotos de trabajos
-      if (data.fotos && Array.isArray(data.fotos)) {
-        for (let i = 0; i < data.fotos.length; i++) {
-          const foto = data.fotos[i];
-          if (foto instanceof File) {
+      if (filesToUpload && Array.isArray(filesToUpload.fotos)) {
+        for (let i = 0; i < filesToUpload.fotos.length; i++) {
+          const fotoFile = filesToUpload.fotos[i]; // Use filesToUpload.fotos
+          if (fotoFile instanceof File) {
             try {
-              const { data: photoUrl, error: photoError } = await professionalService.uploadPhoto(
-                foto,
+              const { data: photoUrlData, error: photoError } = await professionalService.uploadPhoto(
+                fotoFile,
                 'portfolio',
                 userId
               );
-              if (!photoError && photoUrl) {
-                fotosTrabajos.push(photoUrl);
+              if (!photoError && photoUrlData) {
+                fotosTrabajos.push(photoUrlData);
+              } else if (photoError) {
+                console.error('❌ Error uploading work photo:', photoError);
               }
             } catch (error) {
-              console.error('❌ Error uploading work photo:', error);
+              console.error('❌ Exception uploading work photo:', error);
             }
           }
         }
@@ -221,19 +248,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const { error } = await professionalService.createProfessional({
         user_id: userId,
-        nombre: data.nombre,
-        rut: data.rut,
-        telefono: data.telefono,
-        foto_url: fotoUrl || null,
-        especialidades: data.servicios || [],
-        descripcion: data.descripcion,
-        region_principal: data.regionPrincipal,
-        comuna_principal: data.comunaPrincipal,
-        regiones_servicio: data.regionesServicio || [],
-        comunas_servicio: data.comunasServicio || [],
-        experiencia: data.experiencia,
-        fotos_trabajos: fotosTrabajos,
-        precios: data.precios || {}
+        nombre: profileData.nombre,
+        rut: profileData.rut,
+        telefono: profileData.telefono,
+        foto_url: fotoUrl || null, // This is the generated URL
+        especialidades: profileData.servicios || [],
+        descripcion: profileData.descripcion,
+        region_principal: profileData.regionPrincipal,
+        comuna_principal: profileData.comunaPrincipal,
+        regiones_servicio: profileData.regionesServicio || [],
+        comunas_servicio: profileData.comunasServicio || [],
+        experiencia: profileData.experiencia,
+        fotos_trabajos: fotosTrabajos, // These are the generated URLs
+        precios: profileData.precios || {}
       });
 
       if (error) throw error;
@@ -411,7 +438,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn,
     signOut,
     resetPassword,
-    resendConfirmation
+    resendConfirmation,
+    pendingProfileFiles,
+    setPendingProfileFiles
   };
 
   return (

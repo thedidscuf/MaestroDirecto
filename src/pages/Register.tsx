@@ -24,7 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
-  const { signUp } = useAuth();
+  const { signUp, setPendingProfileFiles } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -207,7 +207,7 @@ const Register: React.FC = () => {
       });
 
       // Guardar datos del profesional en localStorage antes del registro
-      const professionalData = {
+      const professionalDataForStorage = {
         nombre: formData.nombre,
         rut: formData.rut,
         telefono: formData.telefono,
@@ -218,12 +218,21 @@ const Register: React.FC = () => {
         regionesServicio: formData.regionesServicio,
         comunasServicio: formData.comunasServicio,
         experiencia: formData.experiencia,
-        precios: formData.precios,
-        fotos: formData.fotos,
-        foto: formData.foto
+        precios: formData.precios
+        // File objects (formData.foto, formData.fotos) are intentionally omitted
       };
 
-      localStorage.setItem('pendingProfessionalData', JSON.stringify(professionalData));
+      localStorage.setItem('pendingProfessionalData', JSON.stringify(professionalDataForStorage));
+
+      // Pass the actual File objects to AuthContext state
+      if (setPendingProfileFiles) {
+        setPendingProfileFiles({ foto: formData.foto, fotos: formData.fotos });
+      } else {
+        console.error("setPendingProfileFiles function is not available from AuthContext");
+        setError("Ocurrió un error de configuración. Por favor, intenta más tarde.");
+        setLoading(false);
+        return;
+      }
 
       // Registrar usuario en Supabase Auth
       const { error: authError } = await signUp(formData.email, formData.password, {
