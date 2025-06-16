@@ -22,6 +22,7 @@ interface AuthContextType {
   resendConfirmation: (email: string) => Promise<{ error: AuthError | null }>;
   pendingProfileFiles: { foto: File | null, fotos: File[] } | null;
   setPendingProfileFiles: (files: { foto: File | null, fotos: File[] } | null) => void;
+  isCreatingProfile: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,6 +40,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingProfileFiles, setPendingProfileFilesState] = useState<{ foto: File | null, fotos: File[] } | null>(null);
+  const [isCreatingProfile, setIsCreatingProfile] = useState<boolean>(false);
 
   const setPendingProfileFiles = (files: { foto: File | null, fotos: File[] } | null) => {
     setPendingProfileFilesState(files);
@@ -148,31 +150,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Crear perfil profesional si hay datos pendientes
         const pendingData = localStorage.getItem('pendingProfessionalData');
-        if (pendingData) {
+        if (pendingData && pendingProfileFiles) { // Ensure both exist before attempting
+          setIsCreatingProfile(true); // Set loading state true
           try {
             const professionalDataFromStorage = JSON.parse(pendingData);
-            // CRITICAL: Use pendingProfileFiles state here
-            if (pendingProfileFiles) { // Check if files are set
-              await createProfessionalProfile(session.user.id, professionalDataFromStorage, pendingProfileFiles);
-              localStorage.removeItem('pendingProfessionalData');
-              setPendingProfileFiles(null); // Clear the files from state
-              console.log('✅ Professional profile created from pending data and files. Cleared localStorage and pending files state.');
-            } else {
-              // This case should ideally not happen if Register.tsx sets files correctly
-              console.warn('⚠️ Pending professional data found in localStorage, but no pending files in AuthContext state. Profile might be incomplete.');
-              // Decide if you still want to attempt profile creation without files or log an error.
-              // For now, let's assume files are required if pendingData exists from registration.
-              // If createProfessionalProfile requires files, this path needs careful consideration.
-              // Let's assume for now that if pendingProfileFiles is null, we don't proceed with this specific logic
-              // or we call createProfessionalProfile with null/empty files if that's a valid state.
-              // Given the plan, Register.tsx will always call setPendingProfileFiles.
-              // So, if pendingData exists, pendingProfileFiles should also exist.
-            }
+            // No need to check pendingProfileFiles again here, already checked in the outer if
+            await createProfessionalProfile(session.user.id, professionalDataFromStorage, pendingProfileFiles);
+            localStorage.removeItem('pendingProfessionalData');
+            setPendingProfileFiles(null);
+            console.log('✅ Professional profile created from pending data and files. Cleared localStorage and pending files state.');
           } catch (error) {
-            // Error handling for createProfessionalProfile (e.g., DB error)
-            // localStorage.removeItem and setPendingProfileFiles(null) are NOT called here, preserving data.
             console.error('❌ Critical error creating professional profile from pending data. Data will be kept for next attempt (localStorage & context state):', error);
+            // localStorage and pendingProfileFiles are intentionally not cleared here
+          } finally {
+            setIsCreatingProfile(false); // Set loading state false
           }
+        } else if (pendingData && !pendingProfileFiles) {
+          // Handle case where localStorage data exists but files are missing in context state
+          // This might indicate an incomplete previous registration attempt or an inconsistent state.
+          console.warn('⚠️ Pending professional data found in localStorage, but no pending files in AuthContext state. Profile creation cannot proceed. Manual cleanup or re-registration might be needed.');
+          // Optionally, clear localStorage.removeItem('pendingProfessionalData') here if it's considered stale without files.
+          // For now, leave it, as the user might re-attempt registration which would call setPendingProfileFiles.
         }
       }
 
@@ -195,7 +193,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [pendingProfileFiles]); // Add pendingProfileFiles to the dependency array
 
   const createProfessionalProfile = async (userId: string, profileData: any, filesToUpload: { foto: File | null, fotos: File[] }) => {
     try {
@@ -440,7 +438,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetPassword,
     resendConfirmation,
     pendingProfileFiles,
-    setPendingProfileFiles
+    setPendingProfileFiles,
+    isCreatingProfile
   };
 
   return (

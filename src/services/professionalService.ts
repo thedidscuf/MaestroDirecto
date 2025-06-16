@@ -44,16 +44,45 @@ export const professionalService = {
   // Obtener profesional por user_id
   async getProfessionalByUserId(userId: string) {
     try {
+      // Use destructuring to get status directly if it's part of the successful response structure
+      // when an error object is present. Typically, for HTTP errors, SupabaseError includes status.
       const { data, error } = await supabase
         .from('professionals')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle(); // Changed to maybeSingle()
 
-      if (error) throw error;
+      if (error) {
+        // Check if the error object has a 'status' property (common for SupabaseHttpError)
+        // and if that status is 406.
+        // Supabase errors might also have a 'code' string. e.g. error.code === 'PGRST116'
+        // A direct 406 from the server would likely be an HttpError with a status.
+        const supabaseError = error as any; // Use 'any' for robust checking of potential properties
+        if (supabaseError.status === 406 || (supabaseError.details && supabaseError.details.includes('406'))) {
+          console.warn(`Received HTTP 406 (or error containing 406) when fetching professional by user ID ${userId}. Treating as profile not found.`);
+          return { data: null, error: null };
+        }
+        // For other errors, re-throw them to be caught by the catch block below
+        throw error;
+      }
+
+      // If .maybeSingle() was used:
+      // - If no row found, data is null, error is null.
+      // - If one row found, data is the object, error is null.
       return { data, error: null };
-    } catch (error) {
-      console.error('Error fetching professional:', error);
+
+    } catch (error: any) {
+      // This catch block will handle errors re-thrown from the try block,
+      // or other unexpected errors during the await supabase call.
+      console.error(`Error in getProfessionalByUserId for user ID ${userId}:`, error);
+
+      // Final check for 406 in the catch-all, in case the error was thrown
+      // and then caught here.
+      if (error.status === 406 || (error.details && error.details.includes('406'))) {
+        console.warn(`Caught HTTP 406 (or error containing 406) in getProfessionalByUserId for user ID ${userId}. Treating as profile not found.`);
+        return { data: null, error: null };
+      }
+      // For any other error caught, return it so the caller can decide how to handle.
       return { data: null, error };
     }
   },
