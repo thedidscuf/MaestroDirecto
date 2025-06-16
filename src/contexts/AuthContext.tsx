@@ -146,9 +146,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const professionalData = JSON.parse(pendingData);
             await createProfessionalProfile(session.user.id, professionalData);
             localStorage.removeItem('pendingProfessionalData');
-            console.log('✅ Professional profile created from pending data');
+            console.log('✅ Professional profile created successfully from pending data and removed from localStorage');
           } catch (error) {
-            console.error('❌ Error creating professional profile:', error);
+            console.error('❌ Critical error creating professional profile from pending data. Data will be kept in localStorage for next attempt:', error);
           }
         }
       }

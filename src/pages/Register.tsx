@@ -118,6 +118,14 @@ const Register: React.FC = () => {
   };
 
   const validateStep = (step: number): boolean => {
+    // This function validates the current step's form data.
+    // It ensures that all fields that are NOT NULL in the 'professionals' database table
+    // (and don't have a default value) are filled before proceeding.
+    // Key NOT NULL fields from schema: nombre, rut, telefono, descripcion,
+    // region_principal, comuna_principal, experiencia.
+    // Other fields like especialidades, fotos_trabajos, regiones_servicio have NOT NULL
+    // constraints but also database defaults if empty arrays are passed, however,
+    // client-side logic enforces minimums for these (e.g., at least one service, 3 photos).
     switch (step) {
       case 1:
         if (!formData.nombre || !formData.rut || !formData.email || !formData.password || !formData.telefono) {
